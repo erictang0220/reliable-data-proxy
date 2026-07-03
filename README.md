@@ -1,4 +1,4 @@
-# reliable-data-proxy
+# Reliable Data Proxy
 
 A reliable data transfer implementation over UDP in C, with a Python proxy that emulates packet loss -- part of a computer networking project exploring Go-Back-N (GBN) and the three-way handshake over an unreliable channel.
 
