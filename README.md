@@ -1,16 +1,82 @@
-# CS118 Project 2
+# reliable-data-proxy
 
-This is the repo for Winter 2023 cs118 project 2.
+A reliable data transfer implementation over UDP in C, with a Python proxy that emulates packet loss -- part of a computer networking project exploring Go-Back-N (GBN) and the three-way handshake over an unreliable channel.
 
-## Makefile
+## Overview
 
-This provides a couple make targets for things.
-By default (all target), it makes the `server` and `client` executables.
+This project implements a client/server pair that transfers a file reliably over UDP using a custom packet protocol. Because UDP provides no delivery guarantees, the client and server implement:
 
-It provides a `clean` target, and `zip` target to create the submission file as well.
+- A **three-way handshake** (SYN / SYN-ACK / ACK) to establish a connection
+- A **sliding window** with Go-Back-N (GBN) semantics and retransmission on timeout
+- A **four-way connection teardown** (FIN / ACK exchange with 2-second FIN wait)
 
-You will need to modify the `Makefile` USERID to add your userid for the `.zip` turn-in at the top of the file.
+`rdproxy.py` sits between the client and server and randomly drops ~15% of packets (configurable) to simulate an unreliable network. The client and server must handle these losses purely through timeouts and retransmission.
 
-## Academic Integrity Note
+## Packet Format
 
-You are encouraged to host your code in private repositories on [GitHub](https://github.com/), [GitLab](https://gitlab.com), or other places.  At the same time, you are PROHIBITED to make your code for the class project public during the class or any time after the class.  If you do so, you will be violating academic honestly policy that you have signed, as well as the student code of conduct and be subject to serious sanctions.
+Each packet is 524 bytes total (12-byte header + 512-byte payload):
+
+| Field | Type | Description |
+|---|---|---|
+| `seqnum` | `unsigned short` | Sequence number |
+| `acknum` | `unsigned short` | Acknowledgment number |
+| `syn` | `char` | SYN flag |
+| `fin` | `char` | FIN flag |
+| `ack` | `char` | ACK flag |
+| `dupack` | `char` | Duplicate ACK flag |
+| `length` | `unsigned int` | Payload length |
+| `payload` | `char[512]` | Data |
+
+Sequence numbers wrap modulo 25601.
+
+## Components
+
+| File | Description |
+|---|---|
+| `client.c` | Reads a file and transmits it to the server using a sliding window over UDP; handles SYN/ACK handshake and FIN teardown |
+| `server.c` | Receives file data from the client, writes it to a numbered output file (e.g. `1.file`), and acknowledges each packet; handles connection setup and teardown |
+| `rdproxy.py` | Asyncio UDP proxy that forwards packets between client and server with configurable random drop rate |
+| `test_format.py` | Output format validation script |
+
+## Tech Stack
+
+- **Language:** C (client/server), Python 3 (proxy)
+- **Transport:** POSIX UDP sockets (`SOCK_DGRAM`), non-blocking I/O via `fcntl`
+- **Reliability mechanism:** Sliding window / Go-Back-N, 500 ms RTO, window size 10
+- **Build:** GNU Make + GCC (`-Wall -Wextra`)
+
+## Build and Run
+
+```bash
+make                          # builds server and client executables
+```
+
+Start the server:
+
+```bash
+./server <PORT> <ISN>
+# example: ./server 5000 0
+```
+
+Start the proxy (in a separate terminal):
+
+```bash
+python3 rdproxy.py <SERVER_PORT> <PROXY_PORT> <DROP_RATE>
+# example: python3 rdproxy.py 5000 9999 0.15
+```
+
+Send a file from the client through the proxy:
+
+```bash
+./client <HOSTNAME-OR-IP> <PROXY_PORT> <ISN> <FILENAME>
+# example: ./client 127.0.0.1 9999 0 myfile.txt
+```
+
+The server writes received data to sequentially numbered files (`1.file`, `2.file`, ...) in the working directory.
+
+To clean build artifacts:
+
+```bash
+make clean
+```
+
